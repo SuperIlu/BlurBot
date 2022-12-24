@@ -140,7 +140,7 @@ def make_random(mastodon):
         rand_media = mastodon.media_post(fname, description="Random hash: {}".format(rand_hash))
 
         mastodon.status_post(
-            'Random hourly #blurhash image.\n\nhash: "{}"\n\npunch={}\n\n#CreativeCoding #BotsOfMastodon #GenerativeArt'.format(rand_hash, punch),
+            'Random hourly #blurhash image.\n\nhash: "{}"\n\npunch={}\n\n#CreativeCoding #BotsOfMastodon #GenerativeArt #RandomHourlyBlurHashImage'.format(rand_hash, punch),
             media_ids=[rand_media["id"]],
             visibility="unlisted",
         )
