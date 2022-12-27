@@ -26,13 +26,15 @@ last_random = None
 
 sql_create_table = """
 CREATE TABLE IF NOT EXISTS accounts (
-    id text PRIMARY KEY,
-    last_image TEXT NOT NULL
+    id text    PRIMARY KEY,
+    last_image TEXT NOT NULL,
+    count      INTEGER NOT NULL
 );
 """
 
-sql_insert = "insert or replace into accounts (id, last_image) values(?, CURRENT_DATE)"
-sql_count = "select count(*) from accounts where id=? and last_image=CURRENT_DATE"
+sql_insert = "INSERT OR REPLACE INTO accounts (id, last_image, count) VALUES (?, CURRENT_DATE, 0);"
+sql_select = "SELECT count FROM accounts WHERE id=? AND last_image=CURRENT_DATE;"
+sql_update = "UPDATE accounts SET count=count+1 WHERE id=? AND last_image=CURRENT_DATE;"
 
 
 def login_app(user, pw):
@@ -66,10 +68,16 @@ def create_table(conn, create_table_sql):
         print(e)
 
 
-def create_entry(conn, id):
-    print("RL: inserting {}".format(id))
+def update_entry(conn, id):
     cur = conn.cursor()
-    cur.execute(sql_insert, (id,))
+    cur.execute(sql_select, (id,))
+    row = cur.fetchone()
+    if row is None:
+        print("RL: inserting {}".format(id))
+        cur.execute(sql_insert, (id,))
+    else:
+        print("RL: updating {}".format(id))
+        cur.execute(sql_update, (id,))
     conn.commit()
 
     return cur.lastrowid
@@ -78,9 +86,9 @@ def create_entry(conn, id):
 def check_entry(conn, id):
     print("RL: checking {}".format(id))
     cur = conn.cursor()
-    cur.execute(sql_count, (id,))
-    numberOfRows = cur.fetchone()[0]
-    return numberOfRows == 0
+    cur.execute(sql_select, (id,))
+    row = cur.fetchone()
+    return row is None or row[0] < 10
 
 
 def main_app():
@@ -140,7 +148,9 @@ def make_random(mastodon):
         rand_media = mastodon.media_post(fname, description="Random hash: {}".format(rand_hash))
 
         mastodon.status_post(
-            'Random hourly #blurhash image.\n\nhash: "{}"\n\npunch={}\n\n#CreativeCoding #BotsOfMastodon #GenerativeArt #RandomHourlyBlurHashImage'.format(rand_hash, punch),
+            'Random hourly #blurhash image.\n\nhash: "{}"\n\npunch={}\n\n#CreativeCoding #BotsOfMastodon #GenerativeArt #RandomHourlyBlurHashImage'.format(
+                rand_hash, punch
+            ),
             media_ids=[rand_media["id"]],
             visibility="unlisted",
         )
@@ -178,10 +188,6 @@ def randomHash():
     return blurhash
 
 
-def filter_name(str):
-    return str.filter()
-
-
 def letters(input):
     return "".join([c for c in input if c in alphabet_values])
 
@@ -209,7 +215,8 @@ def padd_blurhash(blurhash):
 
 
 def create_hash_images(con, mastodon, n):
-    exp = re.compile("punch=([0-9.]+)")
+    punch_exp = re.compile(r"punch=([0-9.]+)")
+    hash_exp = re.compile(r"hash=([0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz\#\$\%\*\+\,\-\.\:\;\=\?\@\[\]\^\_\{\|\}\~]+)")
     print("Got {} from {} at {}: {}".format(n["type"], n["account"]["acct"], n["created_at"], n["id"]))
     if n["type"] == "mention":
 
@@ -219,40 +226,64 @@ def create_hash_images(con, mastodon, n):
         print(n["status"]["content"] + "\n")
 
         punch = 1
-        m = exp.search(n["status"]["content"])
+        m = punch_exp.search(n["status"]["content"])
         if m:
             punch = float(m[1])
             if punch < 0:
                 punch = 1
 
-        acc_str = padd_blurhash(n["account"]["acct"])
-        name_str = padd_blurhash(letters(n["account"]["display_name"]))
-        print("acc string={}".format(acc_str))
-        print("name string={}".format(name_str))
+        m = hash_exp.search(n["status"]["content"])
+        if m:
+            hash = m[1]
+            hash_str = padd_blurhash(hash)
+            print("hash     = {}".format(hash))
+            print("hash_str = {}".format(hash_str))
 
-        acc_fname = "acc_{}.jpg".format(n["id"])
-        disp_fname = "disp_{}.jpg".format(n["id"])
+            fname = "{}.jpg".format(n["id"])
 
-        img = Image.fromarray(numpy.array(blurhash.decode(acc_str, 640, 480, punch=punch)).astype("uint8"))
-        img.save(acc_fname)
-        acc_media = mastodon.media_post(acc_fname, description="Account name, hash: {}".format(acc_str))
+            img = Image.fromarray(numpy.array(blurhash.decode(hash_str, 640, 480, punch=punch)).astype("uint8"))
+            img.save(fname)
+            media = mastodon.media_post(fname, description="Account name, hash: {}".format(hash_str))
 
-        img = Image.fromarray(numpy.array(blurhash.decode(name_str, 640, 480, punch=punch)).astype("uint8"))
-        img.save(disp_fname)
-        disp_media = mastodon.media_post(disp_fname, description="Display name, hash: {}".format(name_str))
+            mastodon.status_reply(
+                n["status"],
+                'Your string as #blurhash.\n\nstring: "{}"\n\npadded hash: "{}"\n\npunch={}\n\n#CreativeCoding #BotsOfMastodon #GenerativeArt #RequestedBlurHashImage'.format(
+                    hash, hash_str, punch
+                ),
+                media_ids=[media["id"]],
+                visibility="unlisted",
+            )
+            update_entry(con, n["account"]["acct"])
+            os.remove(fname)
+        else:
+            acc_str = padd_blurhash(n["account"]["acct"])
+            name_str = padd_blurhash(letters(n["account"]["display_name"]))
+            print("acc string={}".format(acc_str))
+            print("name string={}".format(name_str))
 
-        mastodon.status_reply(
-            n["status"],
-            'Your account and display name as #blurhash.\n\naccount hash: "{}"\n\ndisplay name hash: "{}"\n\npunch={}\n\n#CreativeCoding #BotsOfMastodon #GenerativeArt'.format(
-                acc_str, name_str, punch
-            ),
-            media_ids=[acc_media["id"], disp_media["id"]],
-            visibility="unlisted",
-        )
-        create_entry(con, n["account"]["acct"])
+            acc_fname = "acc_{}.jpg".format(n["id"])
+            disp_fname = "disp_{}.jpg".format(n["id"])
 
-        os.remove(acc_fname)
-        os.remove(disp_fname)
+            img = Image.fromarray(numpy.array(blurhash.decode(acc_str, 640, 480, punch=punch)).astype("uint8"))
+            img.save(acc_fname)
+            acc_media = mastodon.media_post(acc_fname, description="Account name, hash: {}".format(acc_str))
+
+            img = Image.fromarray(numpy.array(blurhash.decode(name_str, 640, 480, punch=punch)).astype("uint8"))
+            img.save(disp_fname)
+            disp_media = mastodon.media_post(disp_fname, description="Display name, hash: {}".format(name_str))
+
+            mastodon.status_reply(
+                n["status"],
+                'Your account and display name as #blurhash.\n\naccount hash: "{}"\n\ndisplay name hash: "{}"\n\npunch={}\n\n#CreativeCoding #BotsOfMastodon #GenerativeArt #AccountBlurHashImage'.format(
+                    acc_str, name_str, punch
+                ),
+                media_ids=[acc_media["id"], disp_media["id"]],
+                visibility="unlisted",
+            )
+            update_entry(con, n["account"]["acct"])
+
+            os.remove(acc_fname)
+            os.remove(disp_fname)
         time.sleep(1)
 
 
@@ -266,3 +297,4 @@ if __name__ == "__main__":
         main_app()
     else:
         print("Usage:")
+        print("  {} [register|login|run]".format(sys.argv[0]))
