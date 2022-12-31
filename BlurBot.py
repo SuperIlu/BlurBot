@@ -106,7 +106,7 @@ def main_app():
             make_random(mastodon)
         except Exception as e:
             print("Check exception: {}".format(e))
-            time.sleep(CHECK_DELAY)
+        time.sleep(10)
 
 
 def check_notifications(mastodon, con):
